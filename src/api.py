@@ -6,13 +6,28 @@
 это намеренно: логика и транспорт разделены, api.py можно заменить на
 CLI/Slack-бота/что угодно, не трогая agent.py.
 """
+import os
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agent import run_agent
 from .rag import answer as rag_answer
 
 app = FastAPI(title="RAG + Agent lab")
+
+# Фронт (Next.js на Vercel) и бэкенд (Render) — разные домены, значит браузер
+# будет делать cross-origin запрос, и без CORS-заголовков он его заблокирует.
+# ALLOWED_ORIGIN — env-переменная, а не хардкод домена, чтобы не редактировать
+# код при каждом передеплое фронта на новый preview-URL.
+_allowed_origin = os.environ.get("ALLOWED_ORIGIN", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[_allowed_origin] if _allowed_origin != "*" else ["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["*"],
+)
 
 
 class AskRequest(BaseModel):

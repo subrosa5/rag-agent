@@ -1,33 +1,78 @@
-"""embeddings.py — единая точка загрузки модели эмбеддингов и реранкера.
+"""embeddings.py — эмбеддинги и реранкинг за одним интерфейсом, два бэкенда.
 
-КЛЮЧЕВОЙ момент, который любят спрашивать на интервью: вопрос и чанки
-ДОЛЖНЫ эмбеддиться одной и той же моделью. Если ingest.py и retrieval.py
-каждый по отдельности создают SentenceTransformer(...), легко словить баг
-(кто-то поменял модель в одном месте и забыл в другом) и получить мусорный
-поиск без единой ошибки в логах. Поэтому модель живёт в одном модуле.
-
-Модели грузятся лениво (при первом обращении) и кэшируются в памяти процесса —
-загрузка весов занимает секунды, не хотим платить это на каждый вызов.
+Остальной код (ingest.py, retrieval.py) вызывает embed() и rerank() и не
+знает и не должен знать, крутится ли модель локально или это HTTP-вызов
+к Cohere — это и есть смысл вынести бэкенд за интерфейс. Какой бэкенд
+активен, решает config.USE_COHERE (env-переменная), объяснение выбора — там.
 """
 from functools import lru_cache
-from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from . import config
 
 
-@lru_cache(maxsize=1)
-def get_embedder() -> SentenceTransformer:
-    return SentenceTransformer(config.EMBEDDING_MODEL)
+if config.USE_COHERE:
+    import cohere
 
+    @lru_cache(maxsize=1)
+    def _client() -> "cohere.ClientV2":
+        return cohere.ClientV2(api_key=config.COHERE_API_KEY)
 
-@lru_cache(maxsize=1)
-def get_reranker() -> CrossEncoder:
-    return CrossEncoder(config.RERANKER_MODEL)
+    def embed(texts: list[str], input_type: str = "search_document"):
+        """input_type различает "это чанк документа для индекса" и "это вопрос
+        пользователя" — Cohere кодирует их немного по-разному внутри модели,
+        это часть их API. У локальной bi-encoder модели такого разделения нет —
+        вопрос и документ эмбеддятся одинаково, поэтому параметр там просто
+        игнорируется (см. ветку else ниже)."""
+        resp = _client().embed(
+            texts=texts,
+            model=config.EMBEDDING_MODEL,
+            input_type=input_type,
+            embedding_types=["float"],
+        )
+        return resp.embeddings.float_
 
+    def rerank(question: str, candidates: list[dict], top_k: int = None) -> list[dict]:
+        top_k = top_k or config.RERANK_TOP_K
+        if not candidates:
+            return []
+        docs = [c["content"] for c in candidates]
+        resp = _client().rerank(
+            model=config.RERANKER_MODEL,
+            query=question,
+            documents=docs,
+            top_n=top_k,
+        )
+        out = []
+        for r in resp.results:
+            c = candidates[r.index]
+            c["rerank_score"] = r.relevance_score
+            out.append(c)
+        return out
 
-def embed(texts: list[str]):
-    """Список строк -> numpy-массив векторов. normalize_embeddings=True делает
-    векторы единичной длины, тогда dot product == cosine similarity — pgvector
-    считает это под капотом через оператор <=>, но полезно понимать, почему
-    нормализация вообще нужна."""
-    return get_embedder().encode(texts, normalize_embeddings=True)
+else:
+    from sentence_transformers import SentenceTransformer, CrossEncoder
+
+    @lru_cache(maxsize=1)
+    def _embedder() -> SentenceTransformer:
+        return SentenceTransformer(config.EMBEDDING_MODEL)
+
+    @lru_cache(maxsize=1)
+    def _reranker() -> CrossEncoder:
+        return CrossEncoder(config.RERANKER_MODEL)
+
+    def embed(texts: list[str], input_type: str = "search_document"):
+        # normalize_embeddings=True -> единичная длина вектора, тогда dot product
+        # == cosine similarity; pgvector сам считает косинус через <=>, но полезно
+        # понимать, откуда нормализация вообще берётся.
+        return _embedder().encode(texts, normalize_embeddings=True)
+
+    def rerank(question: str, candidates: list[dict], top_k: int = None) -> list[dict]:
+        top_k = top_k or config.RERANK_TOP_K
+        if not candidates:
+            return []
+        pairs = [[question, c["content"]] for c in candidates]
+        scores = _reranker().predict(pairs)  # cross-encoder: (вопрос, чанк) -> релевантность
+        for c, s in zip(candidates, scores):
+            c["rerank_score"] = float(s)
+        candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
+        return candidates[:top_k]

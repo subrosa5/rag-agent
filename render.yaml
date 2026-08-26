@@ -1,0 +1,28 @@
+# render.yaml — Render Blueprint. Даёт Render'у понять, как собрать и запустить
+# сервис, не трогая дашборд руками (кроме значений секретов — их Render
+# попросит ввести при подключении блюпринта, `sync: false` = "не хранить в гите").
+#
+# USE_COHERE=true здесь не случайно: сервис на free/starter tier (512MB RAM)
+# не выдержит self-hosted sentence-transformers (~1.3GB на обе модели) —
+# см. комментарий в src/config.py. Локально по умолчанию USE_COHERE=false.
+services:
+  - type: web
+    name: rag-agent-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: USE_COHERE
+        value: "true"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false

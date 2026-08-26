@@ -1,0 +1,9 @@
+# Для локальной разработки: добавляет self-hosted эмбеддинги/реранкинг
+# (USE_COHERE=false, дефолт). На Render эти пакеты НЕ ставим — торч + веса
+# моделей это ~1.3GB RAM, free/starter tier (512MB) падает с OOM.
+#
+# Установка: pip install -r requirements-local.txt   (уже включает requirements.txt)
+-r requirements.txt
+
+sentence-transformers>=3.0
+numpy>=1.26

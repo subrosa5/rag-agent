@@ -22,6 +22,34 @@ def get_conn():
         conn.close()
 
 
+def init_schema() -> None:
+    """Создаёт таблицу и HNSW-индекс, если их ещё нет.
+
+    Размерность вектора берём из config.EMBEDDING_DIM, а не хардкодим —
+    у local-бэкенда 384, у Cohere 1024 (см. config.py). Если ты руками
+    поменял USE_COHERE на базе, где таблица уже создана под другую
+    размерность, CREATE TABLE IF NOT EXISTS ничего не подскажет — нужно
+    пересоздать базу вручную (DROP TABLE chunks). Это осознанно не
+    автоматизировано: молчаливая ALTER-миграция типа колонки — плохая идея.
+    """
+    with get_conn() as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        conn.execute(
+            f"""CREATE TABLE IF NOT EXISTS chunks (
+                    id          BIGSERIAL PRIMARY KEY,
+                    source      TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    content     TEXT NOT NULL,
+                    embedding   vector({config.EMBEDDING_DIM}) NOT NULL,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                )"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
+               ON chunks USING hnsw (embedding vector_cosine_ops)"""
+        )
+
+
 def insert_chunks(rows: list[tuple[str, int, str, "np.ndarray"]]) -> None:
     """rows: список (source, chunk_index, content, embedding)."""
     with get_conn() as conn:

@@ -1,5 +1,7 @@
 # rag-agent
 
+**Живое демо:** _(ссылка появится после деплоя фронта — см. ниже)_
+
 Senior-уровневый (по объёму инженерных решений, не по объёму кода) пример
 RAG + агента, написанный руками, без LangChain/LlamaIndex — чтобы под
 каждой строчкой можно было ответить "почему так", а не "так сгенерировалось".
@@ -75,37 +77,55 @@ LLM генерирует строку, которую мы бы выполнил
 без отсебятины?", проверяется отдельным вызовом LLM-судьи). Без этого
 файла проект — "вроде работает", с ним — можно показать число.
 
+**Почему две реализации эмбеддингов/реранкинга (local и Cohere)?**
+Это НЕ два случайных варианта — это конкретный компромисс self-hosted vs
+managed inference, найденный руками, а не выбранный заранее:
+sentence-transformers (bi-encoder + cross-encoder) вместе весят на диске
+~930MB и держат в памяти процесса ~1.3GB RSS (проверено локально через
+`ps`). На своей машине это бесплатно и ок. На Render free/starter tier
+(512MB RAM) это OOM. Решение — не "уменьшить модель" (потеряли бы качество
+на русском тексте, ради которого модели вообще меняли на мультиязычные),
+а вынести инференс наружу: Cohere Embed + Rerank API, HTTP-вызов вместо
+локальной модели. Переключается одной env-переменной `USE_COHERE`, весь
+остальной код (retrieval.py, ingest.py) не знает и не должен знать, какой
+бэкенд активен — см. `src/embeddings.py`.
+
 ## Структура
 
 ```
 rag-agent/
-├── data/*.txt          # исходные документы (пример: внутренние доки вымышленной компании)
-├── db/schema.sql        # таблица chunks + HNSW-индекс в Postgres
+├── data/*.txt              # исходные документы (пример: внутренние доки вымышленной компании)
+├── db/schema.sql            # справочная структура таблицы chunks (реально создаётся динамически, см. db.py)
+├── render.yaml                # Render Blueprint для деплоя API
+├── web/                         # Next.js чат-фронт (деплоится на Vercel отдельно)
 ├── src/
-│   ├── config.py         # все параметры в одном месте
+│   ├── config.py         # все параметры + переключатель local/Cohere бэкенда
 │   ├── db.py              # тонкий слой поверх psycopg, без ORM
 │   ├── chunking.py        # текст -> чанки с overlap
-│   ├── embeddings.py      # ЕДИНАЯ точка загрузки моделей эмбеддинга/реранкера
+│   ├── embeddings.py      # эмбеддинги/реранкинг: local (sentence-transformers) или Cohere API
 │   ├── ingest.py           # data/*.txt -> чанки -> эмбеддинги -> Postgres
 │   ├── retrieval.py        # hybrid search (vector + BM25) + rerank
 │   ├── rag.py               # чистый RAG: retrieve + generate, без агента
 │   ├── tools.py              # инструменты агента: search_documents, calculate
 │   ├── agent.py               # многошаговый tool-use цикл поверх Groq
 │   ├── eval.py                 # retrieval hit rate + faithfulness (LLM-judge)
-│   └── api.py                   # FastAPI: /agent/ask, /rag/ask
-└── requirements.txt
+│   └── api.py                   # FastAPI: /agent/ask, /rag/ask, CORS для фронта
+├── requirements.txt         # база, без torch — то, что ставится на Render
+└── requirements-local.txt    # requirements.txt + sentence-transformers для self-hosted режима
 ```
 
-## Setup
+## Setup (локально, self-hosted модели)
 
 ```bash
 # Postgres + pgvector уже подняты локально (brew, postgresql@17, база rag_agent)
 
 cp .env.example .env
-# вписать свой GROQ_API_KEY в .env
+# вписать свой GROQ_API_KEY в .env; USE_COHERE не трогать (по умолчанию false)
 
-source .venv/bin/activate
-python -m src.ingest              # построить индекс из data/*.txt
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-local.txt
+
+python -m src.ingest              # построить индекс из data/*.txt (создаст таблицу сам)
 
 python -m src.rag                 # чистый RAG, один вопрос в интерактиве
 python -m src.agent               # агент с инструментами
@@ -113,6 +133,23 @@ python -m src.eval                # прогнать eval-набор, увиде
 
 uvicorn src.api:app --reload      # HTTP API
 ```
+
+## Деплой (Render + Neon + Vercel)
+
+Живая версия использует Cohere вместо self-hosted моделей (см. раздел про
+компромисс выше) и облачный Postgres вместо локального.
+
+1. **Neon** (Postgres с pgvector) — провизионится через Vercel Marketplace
+   (`vercel integration add neon`) или напрямую на neon.tech. Получаешь
+   `DATABASE_URL`.
+2. **Render** — подключи GitHub-репо, Render подхватит `render.yaml`.
+   Впиши секреты в дашборде: `GROQ_API_KEY`, `COHERE_API_KEY` (бесплатный
+   trial на cohere.com), `DATABASE_URL` (из Neon), `ALLOWED_ORIGIN`
+   (домен фронта на Vercel, после его деплоя).
+3. Прогони `python -m src.ingest` один раз против Neon (например, через
+   Render Shell) — наполнит облачную базу.
+4. **Vercel** — `web/` деплоится отдельным проектом, env `NEXT_PUBLIC_API_URL`
+   указывает на Render-сервис.
 
 ## Что дальше (следующий уровень апгрейда)
 

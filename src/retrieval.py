@@ -26,12 +26,14 @@ cross-encoder для precision (медленно, точно, мало канд�
 from rank_bm25 import BM25Okapi
 
 from . import config, db
-from .embeddings import embed, get_reranker
+from .embeddings import embed, rerank as _rerank
 
 
 def vector_search(question: str, k: int = None) -> list[dict]:
     k = k or config.VECTOR_TOP_K
-    q_vec = embed([question])[0]
+    # input_type="search_query": см. embeddings.py — у Cohere вопрос и документ
+    # кодируются по-разному, у локальной модели этот параметр игнорируется.
+    q_vec = embed([question], input_type="search_query")[0]
     return db.vector_search(q_vec, k)
 
 
@@ -68,18 +70,6 @@ def hybrid_retrieve(question: str) -> list[dict]:
 
     if not candidates:
         return []
-    return rerank(question, candidates)
-
-
-def rerank(question: str, candidates: list[dict], top_k: int = None) -> list[dict]:
-    top_k = top_k or config.RERANK_TOP_K
-    reranker = get_reranker()
-
-    pairs = [[question, c["content"]] for c in candidates]
-    scores = reranker.predict(pairs)  # cross-encoder: (вопрос, чанк) -> релевантность
-
-    for c, s in zip(candidates, scores):
-        c["rerank_score"] = float(s)
-
-    candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
-    return candidates[:top_k]
+    # сам реранкинг (cross-encoder локально или Cohere Rerank API) живёт в
+    # embeddings.py — там же, где выбор бэкенда, чтобы не дублировать if USE_COHERE
+    return _rerank(question, candidates)
