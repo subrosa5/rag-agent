@@ -1,0 +1,21 @@
+# --- эмбеддинги и реранкинг ---
+sentence-transformers>=3.0
+numpy>=1.26
+
+# --- база данных ---
+psycopg[binary]>=3.1
+pgvector>=0.3
+
+# --- LLM ---
+groq>=0.11
+
+# --- lexical search для hybrid retrieval ---
+rank-bm25>=0.2.2
+
+# --- конфиг ---
+python-dotenv>=1.0
+
+# --- API ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.9
