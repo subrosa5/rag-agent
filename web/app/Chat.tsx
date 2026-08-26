@@ -4,6 +4,12 @@ import { useState, useRef, useEffect } from "react";
 
 type Message = { role: "user" | "assistant"; content: string };
 
+const EXAMPLES = [
+  "Сколько времени занимает откат деплоя?",
+  "Когда новый сотрудник получает доступ к продакшн-базе?",
+  "Сколько будет 128 * 17 + 4?",
+];
+
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -14,8 +20,8 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  async function send() {
-    const question = input.trim();
+  async function send(override?: string) {
+    const question = (override ?? input).trim();
     if (!question || loading) return;
 
     setMessages((prev) => [...prev, { role: "user", content: question }]);
@@ -48,20 +54,25 @@ export default function Chat() {
       <header className="px-6 py-4 border-b border-neutral-800">
         <h1 className="text-lg font-semibold">rag-agent</h1>
         <p className="text-sm text-neutral-400">
-          Агент с инструментами: поиск по документам (RAG) + калькулятор.
-          Модель сама решает, что вызвать.
+          Отвечает по документам компании, умеет считать.
         </p>
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {messages.length === 0 && (
-          <div className="text-neutral-500 text-sm space-y-2">
-            <p>Попробуй, например:</p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>Сколько времени занимает откат деплоя?</li>
-              <li>Когда новый сотрудник получает доступ к продакшн-базе?</li>
-              <li>Сколько будет 128 * 17 + 4?</li>
-            </ul>
+          <div className="space-y-3">
+            <p className="text-neutral-500 text-sm">Попробуй один из примеров:</p>
+            <div className="flex flex-col gap-2 items-start">
+              {EXAMPLES.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => send(q)}
+                  className="text-sm text-left rounded-xl border border-neutral-700 px-3 py-2 text-neutral-300 hover:bg-neutral-800 transition-colors"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
@@ -100,7 +111,7 @@ export default function Chat() {
           disabled={loading}
         />
         <button
-          onClick={send}
+          onClick={() => send()}
           disabled={loading}
           className="rounded-xl bg-neutral-100 text-neutral-900 px-4 py-2 font-medium disabled:opacity-50"
         >
