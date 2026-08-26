@@ -11,7 +11,11 @@ load_dotenv()  # читает .env в корне проекта, если он �
 
 # --- LLM ---
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-LLM_MODEL = "llama-3.1-8b-instant"
+# llama-3.1-8b-instant (из большинства туториалов) Groq сняли с линейки —
+# поймано прямо здесь, при первом реальном вызове. openai/gpt-oss-20b:
+# open-weight модель от OpenAI, хостится на Groq, быстрая и поддерживает
+# tool calling — нужно для agent.py.
+LLM_MODEL = "openai/gpt-oss-20b"
 
 # --- эмбеддинги и реранкинг: два бэкенда за одним интерфейсом (src/embeddings.py) ---
 #

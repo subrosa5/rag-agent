@@ -10,6 +10,7 @@ groq>=0.11
 
 # --- эмбеддинги/реранкинг через Cohere API (USE_COHERE=true) ---
 cohere>=5.11
+numpy>=1.26   # нужен даже без local-бэкенда: оборачиваем cohere-эмбеддинги в ndarray для pgvector
 
 # --- lexical search для hybrid retrieval ---
 rank-bm25>=0.2.2

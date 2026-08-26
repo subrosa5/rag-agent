@@ -6,4 +6,3 @@
 -r requirements.txt
 
 sentence-transformers>=3.0
-numpy>=1.26

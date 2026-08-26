@@ -7,6 +7,8 @@
 """
 from functools import lru_cache
 
+import numpy as np
+
 from . import config
 
 
@@ -29,7 +31,13 @@ if config.USE_COHERE:
             input_type=input_type,
             embedding_types=["float"],
         )
-        return resp.embeddings.float_
+        # Cohere отдаёт обычные python list[float], а не numpy-массив. pgvector'овский
+        # register_vector умеет сериализовать в тип `vector` только numpy.ndarray —
+        # с обычным списком psycopg молча сериализует его как Postgres double
+        # precision[], и запрос падает ("vector <=> double precision[]").
+        # Поймано на реальном Neon, локально не проявлялось (local-бэкенд и так
+        # возвращает ndarray из sentence-transformers).
+        return np.array(resp.embeddings.float_)
 
     def rerank(question: str, candidates: list[dict], top_k: int = None) -> list[dict]:
         top_k = top_k or config.RERANK_TOP_K
