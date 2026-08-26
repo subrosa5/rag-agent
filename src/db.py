@@ -12,10 +12,26 @@ from . import config
 
 
 @contextmanager
-def get_conn():
-    """Контекстный менеджер: открыли соединение, зарегистрировали тип vector, отдали, закрыли."""
+def _raw_conn():
+    """Соединение БЕЗ register_vector — нужно ровно один раз, для init_schema,
+    потому что register_vector сам читает тип 'vector' из pg_type, а на
+    свежей базе (например, только что созданный Neon-проект) этого типа ещё
+    нет, пока не выполнен CREATE EXTENSION. Курица и яйцо: нельзя
+    зарегистрировать тип раньше, чем расширение, которое его создаёт."""
     conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
-    register_vector(conn)  # без этого psycopg не знает, как сериализовать numpy-массив в vector(384)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_conn():
+    """Контекстный менеджер: открыли соединение, зарегистрировали тип vector, отдали, закрыли.
+    Предполагает, что init_schema() уже отработал (расширение существует) —
+    иначе см. _raw_conn."""
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
+    register_vector(conn)  # без этого psycopg не знает, как сериализовать numpy-массив в vector(N)
     try:
         yield conn
     finally:
@@ -23,7 +39,7 @@ def get_conn():
 
 
 def init_schema() -> None:
-    """Создаёт таблицу и HNSW-индекс, если их ещё нет.
+    """Создаёт расширение, таблицу и HNSW-индекс, если их ещё нет.
 
     Размерность вектора берём из config.EMBEDDING_DIM, а не хардкодим —
     у local-бэкенда 384, у Cohere 1024 (см. config.py). Если ты руками
@@ -32,7 +48,7 @@ def init_schema() -> None:
     пересоздать базу вручную (DROP TABLE chunks). Это осознанно не
     автоматизировано: молчаливая ALTER-миграция типа колонки — плохая идея.
     """
-    with get_conn() as conn:
+    with _raw_conn() as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         conn.execute(
             f"""CREATE TABLE IF NOT EXISTS chunks (
