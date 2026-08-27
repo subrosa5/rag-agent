@@ -10,7 +10,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .agent import run_agent
 from .rag import answer as rag_answer
@@ -31,7 +31,11 @@ app.add_middleware(
 
 
 class AskRequest(BaseModel):
-    question: str
+    # min_length=1 отсекает пустую строку прямо на уровне валидации запроса —
+    # без этого пустой вопрос доходил бы до retrieval/Groq и тратил впустую
+    # вызов внешнего API. FastAPI сам вернёт 422 с понятной ошибкой, наш код
+    # даже не запустится.
+    question: str = Field(min_length=1)
 
 
 class AskResponse(BaseModel):
