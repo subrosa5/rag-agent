@@ -31,11 +31,23 @@ SYSTEM_PROMPT = (
 MAX_STEPS = 5  # предохранитель от бесконечного цикла (модель зациклилась на вызовах)
 
 
-def run_agent_verbose(user_message: str, extra_instruction: str = None, verbose: bool = True) -> dict:
+def run_agent_verbose(
+    user_message: str,
+    history: list[dict] = None,
+    extra_instruction: str = None,
+    verbose: bool = True,
+) -> dict:
     """То же самое, что run_agent, но возвращает ещё и trace — какие
     инструменты вызывались и что они вернули. Нужен для orchestrator.py:
     критик должен видеть, на чём основан ответ, а не только сам ответ,
     иначе он проверяет "звучит ли складно", а не "правда ли это".
+
+    history — предыдущие сообщения диалога ([{"role": "user"/"assistant",
+    "content": ...}, ...], уже обрезанные memory.py). Мы намеренно НЕ храним
+    в истории промежуточные tool-call сообщения прошлых запросов — только
+    финальные пары вопрос/ответ. Это проще и меньше по объёму; агент в
+    рамках ТЕКУЩЕГО вопроса всё равно может вызвать инструменты заново,
+    если ему нужны свежие данные, а не то, что "помнит" из прошлого ответа.
 
     extra_instruction — необязательная добавка к system prompt. Используется
     orchestrator.py при повторной попытке: "вот что не так с предыдущим
@@ -46,10 +58,9 @@ def run_agent_verbose(user_message: str, extra_instruction: str = None, verbose:
     if extra_instruction:
         system += f"\n\nВАЖНО: предыдущий ответ был отклонён проверкой. {extra_instruction}"
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_message},
-    ]
+    messages = [{"role": "system", "content": system}]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": user_message})
     trace = []
 
     for step in range(MAX_STEPS):
@@ -84,10 +95,10 @@ def run_agent_verbose(user_message: str, extra_instruction: str = None, verbose:
     return {"answer": "Достигнут лимит шагов — агент не смог прийти к финальному ответу.", "trace": trace}
 
 
-def run_agent(user_message: str, verbose: bool = True) -> str:
+def run_agent(user_message: str, history: list[dict] = None, verbose: bool = True) -> str:
     """Обёртка для обратной совместимости (api.py, CLI) — просто текст ответа,
     без trace. Используй run_agent_verbose напрямую, если нужен trace."""
-    return run_agent_verbose(user_message, verbose=verbose)["answer"]
+    return run_agent_verbose(user_message, history=history, verbose=verbose)["answer"]
 
 
 if __name__ == "__main__":

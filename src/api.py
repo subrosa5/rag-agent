@@ -31,12 +31,21 @@ app.add_middleware(
 )
 
 
+class HistoryMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
 class AskRequest(BaseModel):
     # min_length=1 отсекает пустую строку прямо на уровне валидации запроса —
     # без этого пустой вопрос доходил бы до retrieval/Groq и тратил впустую
     # вызов внешнего API. FastAPI сам вернёт 422 с понятной ошибкой, наш код
     # даже не запустится.
     question: str = Field(min_length=1)
+    # history приходит с фронта целиком (см. web/app/Chat.tsx) — фронт не
+    # обрезает её сам, обрезка под контекстное окно — забота бэкенда
+    # (src/memory.py), а не каждого клиента по отдельности.
+    history: list[HistoryMessage] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):
@@ -49,7 +58,8 @@ def ask_agent(req: AskRequest):
     вызов LLM проверяет ответ первого перед тем, как отдать пользователю.
     Дороже и медленнее одного агента (см. orchestrator.py), но это то, что
     реально отвечает на фронте — сознательный выбор в пользу надёжности."""
-    return {"answer": run_agent_with_review(req.question, verbose=False)}
+    history = [m.model_dump() for m in req.history]
+    return {"answer": run_agent_with_review(req.question, history=history, verbose=False)}
 
 
 @app.post("/agent/ask-raw", response_model=AskResponse)
@@ -57,7 +67,8 @@ def ask_agent_raw(req: AskRequest):
     """Тот же агент, но БЕЗ критика — один вызов вместо двух-трёх. Для
     сравнения задержки/поведения и как честный пример, что multi-agent —
     не бесплатная надстройка, а конкретный trade-off надёжность/стоимость."""
-    return {"answer": run_agent(req.question, verbose=False)}
+    history = [m.model_dump() for m in req.history]
+    return {"answer": run_agent(req.question, history=history, verbose=False)}
 
 
 @app.post("/rag/ask")
