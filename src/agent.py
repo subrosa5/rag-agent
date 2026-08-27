@@ -31,12 +31,26 @@ SYSTEM_PROMPT = (
 MAX_STEPS = 5  # предохранитель от бесконечного цикла (модель зациклилась на вызовах)
 
 
-def run_agent(user_message: str, verbose: bool = True) -> str:
+def run_agent_verbose(user_message: str, extra_instruction: str = None, verbose: bool = True) -> dict:
+    """То же самое, что run_agent, но возвращает ещё и trace — какие
+    инструменты вызывались и что они вернули. Нужен для orchestrator.py:
+    критик должен видеть, на чём основан ответ, а не только сам ответ,
+    иначе он проверяет "звучит ли складно", а не "правда ли это".
+
+    extra_instruction — необязательная добавка к system prompt. Используется
+    orchestrator.py при повторной попытке: "вот что не так с предыдущим
+    ответом, поправь" — без этого агент просто повторил бы тот же ответ.
+    """
     client = Groq(api_key=config.GROQ_API_KEY)
+    system = SYSTEM_PROMPT
+    if extra_instruction:
+        system += f"\n\nВАЖНО: предыдущий ответ был отклонён проверкой. {extra_instruction}"
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_message},
     ]
+    trace = []
 
     for step in range(MAX_STEPS):
         resp = client.chat.completions.create(
@@ -47,11 +61,8 @@ def run_agent(user_message: str, verbose: bool = True) -> str:
         msg = resp.choices[0].message
 
         if not msg.tool_calls:
-            # модель решила, что инструменты не нужны (или больше не нужны) — это финальный ответ
-            return msg.content
+            return {"answer": msg.content, "trace": trace}
 
-        # messages.append(msg) должен содержать именно то, что вернул API,
-        # включая tool_calls — модель должна видеть в истории, что САМА их попросила
         messages.append(msg)
 
         for call in msg.tool_calls:
@@ -62,16 +73,21 @@ def run_agent(user_message: str, verbose: bool = True) -> str:
 
             fn = TOOL_FUNCTIONS.get(fn_name)
             result = fn(**args) if fn else f"Неизвестный инструмент: {fn_name}"
+            trace.append({"tool": fn_name, "args": args, "result": str(result)})
 
-            # каждый вызов инструмента требует своего tool-сообщения с тем же tool_call_id —
-            # так модель понимает, какой результат относится к какому вызову
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.id,
                 "content": str(result),
             })
 
-    return "Достигнут лимит шагов — агент не смог прийти к финальному ответу."
+    return {"answer": "Достигнут лимит шагов — агент не смог прийти к финальному ответу.", "trace": trace}
+
+
+def run_agent(user_message: str, verbose: bool = True) -> str:
+    """Обёртка для обратной совместимости (api.py, CLI) — просто текст ответа,
+    без trace. Используй run_agent_verbose напрямую, если нужен trace."""
+    return run_agent_verbose(user_message, verbose=verbose)["answer"]
 
 
 if __name__ == "__main__":
