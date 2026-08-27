@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .agent import run_agent
+from .orchestrator import run_agent_with_review
 from .rag import answer as rag_answer
 
 app = FastAPI(title="RAG + Agent lab")
@@ -44,7 +45,18 @@ class AskResponse(BaseModel):
 
 @app.post("/agent/ask", response_model=AskResponse)
 def ask_agent(req: AskRequest):
-    """Полный агент с доступом к инструментам (RAG + калькулятор)."""
+    """Агент + критик (multi-agent, reflection-паттерн): второй независимый
+    вызов LLM проверяет ответ первого перед тем, как отдать пользователю.
+    Дороже и медленнее одного агента (см. orchestrator.py), но это то, что
+    реально отвечает на фронте — сознательный выбор в пользу надёжности."""
+    return {"answer": run_agent_with_review(req.question, verbose=False)}
+
+
+@app.post("/agent/ask-raw", response_model=AskResponse)
+def ask_agent_raw(req: AskRequest):
+    """Тот же агент, но БЕЗ критика — один вызов вместо двух-трёх. Для
+    сравнения задержки/поведения и как честный пример, что multi-agent —
+    не бесплатная надстройка, а конкретный trade-off надёжность/стоимость."""
     return {"answer": run_agent(req.question, verbose=False)}
 
 
