@@ -24,6 +24,12 @@ export default function Chat() {
     const question = (override ?? input).trim();
     if (!question || loading) return;
 
+    // history — это messages ДО добавления текущего вопроса: агент должен
+    // увидеть предыдущие сообщения как контекст, а не как часть нового
+    // вопроса. Обрезка под контекстное окно — забота бэкенда (src/memory.py),
+    // фронт просто шлёт всё, что накопилось в чате.
+    const history = messages;
+
     setMessages((prev) => [...prev, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
@@ -32,7 +38,7 @@ export default function Chat() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, history }),
       });
       const data = await res.json();
       const answer = res.ok
